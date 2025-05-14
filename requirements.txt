@@ -1,0 +1,6 @@
+streamlit
+pandas
+numpy
+duckdb
+matplotlib
+xlsxwriter
