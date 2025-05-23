@@ -382,8 +382,9 @@ def create_legend():
         .suficiente   { background-color: #66cc66; color: black; }
         .excessao     { background-color: gray; color: black; }
         .servicos     { background-color: #3C5096; color white}
+        .servicos-prestadores {background-color: #B845F5}
     </style>
-    <p>Legenda de Cores:</p>
+    <p>Legenda:</p>
     <table class="legend-table">
         <tr>
             <th>Categoria</th>
@@ -417,12 +418,18 @@ def create_legend():
         </tr>
         <tr>
             <td>Serviço</td>
-            <td>Itens de serviços (Criticidade por quantidade diferente dos demais itens) </td>
+            <td>Itens de serviços (criticidade diferenciada) </td>
             <td class="servicos"></td>
         </tr>
+        <tr>
+            <td>Prestadores de Serviços</td>
+            <td>Itens de serviços prestados por terceiros (criticidade diferenciada)</td>
+            <td class="servicos-prestadores"></td>
+        </tr>
+
         
     </table>
-    <p>Legenda de Prioridades:</p>
+    <p>Grau de Prioridades:</p>
     <table class="legend-table">
         <tr>
             <th>Prioridade</th>
@@ -605,24 +612,34 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
                 ]
                 df_display = df_sorted[ordered]
 
-
+                SPECIAL_PREFIXES = [
+                    "280107", "280501",
+                    "350101",
+                    "410301", "410305", "410307", "410319"
+                ]
                 def style_full_row(row):
                     styles = []
                     for col in df_display.columns:
-                        # só estiliza as colunas de quantidade
-                        if col.endswith("_qtd"):
+                        # 1) Destaca CodigoDescricao se tiver prefixo especial
+                        if col == "CodigoDescricao":
+                            if any(row["CodigoDescricao"].startswith(pref) for pref in SPECIAL_PREFIXES):
+                                styles.append("background-color: #B845F5; color: white")
+                            else:
+                                styles.append("")
+                        # 2) Continua aplicando o estilo normal para as colunas de quantidade
+                        elif col.endswith("_qtd"):
                             if service_map.get(row["CodigoDescricao"], False):
-                                # serviços: roxo
                                 styles.append("background-color: #3C5096; color: white;")
                             else:
-                                # exceções: cinza, senão usa style_quantidade
                                 if exception_map.get(row["CodigoDescricao"], False):
                                     styles.append("background-color: gray; color: black;")
                                 else:
                                     styles.append(style_quantidade(row[col]))
+                        # 3) Colunas não numéricas sem estilo
                         else:
                             styles.append("")
                     return styles
+
                 styled = df_display.style.apply(style_full_row, axis=1)
                 
 
