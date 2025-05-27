@@ -15,7 +15,6 @@ from data_processing import (
 from visualizations import plot_time_series
 from data_update import atualizar_base_incremental
 
-# ----- Funções de Banco de Dados e Carregamento dos Dados -----
 def load_database(df: pd.DataFrame, table_name: str, con):
     """Registra o DataFrame no DuckDB, criando (ou recriando) a tabela."""
     con.register("df_excel", df)
@@ -41,14 +40,12 @@ def prepare_base_data(con, table_name, excess_table_name, weight_table_name, ser
     df_weight = con.execute(weight_query).fetchdf()
     df_service = con.execute(service_query).fetchdf()
     
-    # Consolida os dados com a agregação nacional (BR)
     colunas_datas = df.columns[3:]
     df_br = df.groupby(["Código", "Descrição"], as_index=False)[colunas_datas].sum()
     df_br["UF"] = "BR"
     df_br = df_br[["UF", "Código", "Descrição"] + list(colunas_datas)]
     df = pd.concat([df, df_br], ignore_index=True)
     
-    # Transforma os dados para formato 'long'
     df_melted = df.melt(
         id_vars=["UF", "Código", "Descrição"],
         value_vars=colunas_datas,
@@ -60,7 +57,6 @@ def prepare_base_data(con, table_name, excess_table_name, weight_table_name, ser
         df_melted["Código"].astype(str) + " - " + df_melted["Descrição"].astype(str)
     )
     
-    # Verifica exceções (itens que não entram no cálculo) pela coluna CodigoDescricao
     if not df_excess.empty:
         excess_set = set(df_excess["DESCRIÇÃO"].dropna())
         df_melted["Exceção"] = df_melted["CodigoDescricao"].apply(
@@ -130,7 +126,6 @@ def prepare_quantity_table(df, df_excess, df_service):
 
     return df_tab
 
-# ----- Funções de Estilo para as Tabelas -----
 def style_quantidade(val):
     if pd.isna(val):
         return ""
@@ -159,27 +154,18 @@ def compute_statistics_from_pivot(pivot_df):
                 sejam diferentes de "Exceção" e "Suficiente" e retorna os valores do primeiro quartil, 
                 mediana e terceiro quartil agrupados por UF.
                 """
-                # Converte de pivot para formato longo
                 id_col = pivot_df.index.name if pivot_df.index.name is not None else "index"
                 df_long = pivot_df.reset_index().melt(id_vars=id_col, var_name="UF", value_name="Valor")
 
-                # Remove linhas que tenham o hífen (ou seja, em que não haja valor numérico)
                 df_long = df_long[df_long["Valor"] != '-']
                 
-                # Converte os valores para numérico
                 df_long["Valor"] = pd.to_numeric(df_long["Valor"], errors="coerce")
                 
-                # Cria uma nova coluna com a classificação usando get_criticidade
                 df_long["Criticidade"] = df_long["Valor"].apply(get_criticidade)
                 df_long = df_long.dropna(subset=["Valor"])
                 
-                # Filtra para manter apenas os valores que NÃO sejam "Exceção" ou "Suficiente"
                 df_valid = df_long[~df_long["Criticidade"].isin(["Exceção", "Suficiente"])]
                 
-                # Para cada UF, calcula:
-                #   - Q1 (25%): primeiro quartil
-                #   - Mediana (50%)
-                #   - Q3 (75%): terceiro quartil
                 stats = df_valid.groupby("UF")["Valor"].agg(
                     Q1=lambda x: x.quantile(0.25),
                     Median="median",
@@ -189,7 +175,6 @@ def compute_statistics_from_pivot(pivot_df):
                 return stats
 
 
-# ----- Funções para Filtragem e Construção da Tabela -----
 def filter_quantity_data(df_tab ,input_capital, selected_item, selected_group, selected_criticidade,date_cols):
     df_filtered = df_tab.copy()
     
@@ -201,7 +186,6 @@ def filter_quantity_data(df_tab ,input_capital, selected_item, selected_group, s
         df_filtered = df_filtered[df_filtered["Grupo"].isin(selected_group)]
     
     if selected_criticidade:
-        # Se date_cols for uma string, converte para lista para iterar corretamente.
         cols_to_check = [date_cols] if isinstance(date_cols, str) else date_cols
         def row_matches(row):
             if row["Exceção"] and "Exceção" in selected_criticidade:
@@ -239,19 +223,15 @@ def build_index_pivot_table(df, locked_date, df_base):
     utiliza o mapeamento definido abaixo. Usa a tabela df_base (geralmente o df_tab)
     para recuperar o flag 'Exceção' de cada CodigoDescricao.
     """
-    # Seleciona as colunas necessárias e renomeia locked_date para 'Valor'
     df_locked = df[["UF", "CodigoDescricao", locked_date, "Exceção"]].copy()
     df_locked.rename(columns={locked_date: "Valor"}, inplace=True)
-    # Cria a tabela pivot com a quantidade (Valor)
     df_pivot = df_locked.pivot(index="CodigoDescricao", columns="UF", values="Valor")
     df_pivot = df_pivot.fillna('-')
     if "BR" in df_pivot.columns:
         df_pivot = df_pivot.drop("BR", axis=1)
     
-    # Cria um mapeamento de CódigoDescrição para o flag de exceção (usando df_base)
     exception_mapping = df_base.drop_duplicates("CodigoDescricao").set_index("CodigoDescricao")["Exceção"]
     
-    # Define o mapeamento de criticidade para os índices (para valores numéricos)
     criticidade_mapping = {
         "Suficiente": 1,
         "Aceitável": 2,
@@ -259,16 +239,14 @@ def build_index_pivot_table(df, locked_date, df_base):
         "SuperCrítico": 4,
     }
     
-    # Função que converte um valor em seu índice, considerando se é exceção
     def cell_to_index(val, codigo):
         if exception_mapping.get(codigo, False):
-            return 0  # Exceção terá índice 0
+            return 0  
         if isinstance(val, (int, float)):
             crit = get_criticidade(val)
             return criticidade_mapping.get(crit, np.nan)
         return np.nan
 
-    # Aplica a função para cada célula do pivot, considerando a linha (CodigoDescricao)
     df_index = df_pivot.copy()
     for codigo in df_index.index:
         for col in df_index.columns:
@@ -282,9 +260,7 @@ def build_pivot_table(df, locked_date):
     df_locked.rename(columns={locked_date: "Valor"}, inplace=True)
     df_pivot = df_locked.pivot(index="CodigoDescricao", columns="UF", values="Valor")
     df_pivot = df_pivot.fillna('-')
-    # Converter valores numéricos sem casas decimais para int
     df_pivot = df_pivot.applymap(lambda x: int(x) if isinstance(x, float) and x.is_integer() else x)
-    # Remove a coluna BR, se existir
     if "BR" in df_pivot.columns:
         df_pivot = df_pivot.drop("BR", axis=1)
     df_pivot.index.name = "CodigoDescricao"
@@ -295,12 +271,9 @@ def build_weight_pivot_table(df, locked_date):
     df_locked.rename(columns={locked_date: "Valor"}, inplace=True)
     df_pivot = df_locked.pivot(index="CodigoDescricao", columns="UF", values="Valor")
     df_pivot = df_pivot.fillna('-')
-    # Converter valores numéricos sem casas decimais para int
     df_pivot = df_pivot.applymap(lambda x: int(x) if isinstance(x, float) and x.is_integer() else x)
-    # Remove a coluna BR, se existir
     if "BR" in df_pivot.columns:
         df_pivot = df_pivot.drop("BR", axis=1)
-    # Define o nome do índice
     df_pivot.index.name = "CodigoDescricao"
     
     return df_pivot
@@ -321,20 +294,16 @@ def process_weight_data(df_weight: pd.DataFrame):
         df_weight_filtrado["Cód.Estrutura"].astype(str) + " - " + df_weight_filtrado["Descrição"].astype(str)
     ).str.strip()
     
-    # Reordena as colunas para garantir que "UF" fique na posição correta
     colunas = df_weight_filtrado.columns.tolist()
     colunas.remove("CodigoDescricao")
     idx_uf = colunas.index("UF")
     colunas.insert(idx_uf, "CodigoDescricao")
     df_weight_filtrado = df_weight_filtrado[colunas]
     
-    # Cria a coluna 'Grupo' com os 4 primeiros dígitos do código
     df_weight_filtrado['Cód_Estrutura_4'] = df_weight_filtrado['Cód.Estrutura'].str[:4]
     df_weight_filtrado["Grupo"] = df_weight_filtrado["CodigoDescricao"].str.split(" - ").str[0].str[:4]
     
-    # Identifica as colunas de data com padrão 'mm/aaaa'
     date_cols_weight = [col for col in df_weight_filtrado.columns if re.match(r'\d{2}/\d{4}', col)]
-    # Converte as colunas de data para numérico
     for col in date_cols_weight:
         df_weight_filtrado[col] = (
             df_weight_filtrado[col]
@@ -357,7 +326,6 @@ def process_weight_data(df_weight: pd.DataFrame):
     return df_weight_filtrado
 
 
-# ----- Funções de Interface e Exibição -----
 def create_legend():
     """Cria a legenda exibida na sidebar da aplicação."""
     legend_markdown = """
@@ -517,11 +485,9 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
                 selected_criticidade,
                 selected_date or all_dates
             )
-            locked_date = default_date  # Data de referência fixada
+            locked_date = default_date  
             
-            # Obtém a tabela pivot de quantidade (tabela consolidada)
             df_pivot = build_pivot_table(df_filtrado, locked_date)
-            # Aplica o estilo (como no código original)
             exception_map = df_tab.set_index("CodigoDescricao")["Exceção"].to_dict()
             service_map = df_tab.set_index("CodigoDescricao")["Serviço"].to_dict()
             
@@ -566,7 +532,6 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
             else:
                 qtd_col = qtd_cols[0]
                 pond_col = pond_cols[0]
-                # 3) Cria Criticidade, mas força "Exceção" quando apropriado
                 df_sel["Criticidade"] = df_sel.apply(
                     lambda row: "Exceção" 
                                 if exception_map.get(row["CodigoDescricao"], False) 
@@ -578,7 +543,6 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
                             else ("Prioridade 2" if x > 0.4 else "Prioridade 3")
                 )
 
-             
                 severity_map = {
                     "SuperCrítico": 4,
                     "Crítico":      3,
@@ -591,7 +555,6 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
                 if selected_prioridade:
                     df_sel = df_sel[df_sel["Prioridade"].isin(selected_prioridade)]
 
-                # 5) Ordena primeiro por CriticidadeNivel, depois por quantidade
                 df_sorted = df_sel.sort_values(
                     by=["CriticidadeNivel", pond_col],
                     ascending=[False, False]
@@ -600,13 +563,11 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
 
                 df_sorted["Falta p/ Cobertura Mínima"] = df_sorted[qtd_col].apply(lambda x: max(0, 100 - x))
 
-                # 6) Exclui qualquer coluna que termine com '_pond' antes de exibir
                 cols_display = [
                     c for c in df_sorted.columns
                     if c not in ("Criticidade", "CriticidadeNivel")
                     and not c.endswith("_pond")
                 ]
-                # Mantém 'CodigoDescricao' sempre à frente
                 ordered = ["CodigoDescricao"] + [
                     c for c in cols_display if c != "CodigoDescricao"
                 ]
@@ -620,22 +581,16 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
                 def style_full_row(row):
                     styles = []
                     for col in df_display.columns:
-                        # 1) Destaca CodigoDescricao se tiver prefixo especial
-                        if col == "CodigoDescricao":
+                        if col.endswith("_qtd"):
                             if any(row["CodigoDescricao"].startswith(pref) for pref in SPECIAL_PREFIXES):
                                 styles.append("background-color: #B845F5; color: white")
-                            else:
-                                styles.append("")
-                        # 2) Continua aplicando o estilo normal para as colunas de quantidade
-                        elif col.endswith("_qtd"):
-                            if service_map.get(row["CodigoDescricao"], False):
+                            elif service_map.get(row["CodigoDescricao"], False):
                                 styles.append("background-color: #3C5096; color: white;")
                             else:
                                 if exception_map.get(row["CodigoDescricao"], False):
                                     styles.append("background-color: gray; color: black;")
                                 else:
                                     styles.append(style_quantidade(row[col]))
-                        # 3) Colunas não numéricas sem estilo
                         else:
                             styles.append("")
                     return styles
@@ -645,7 +600,6 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
 
                 st.dataframe(styled)
                 
-                # 8) Botão de download
                 st.download_button(
                     label="📥 Baixar Tabela Consolidada",
                     data=to_excel(styled, "Tabela_Consolidada"),
@@ -690,13 +644,7 @@ def display_series_historica(tab, df, colunas_datas):
                 plot_time_series(df_pivot)
             else:
                 st.warning("Selecione pelo menos uma região e/ou item para visualizar a série histórica.")
-        
-
-
-
-
-
-# ----- Função Principal -----
+    
 def main():
     st.title("Leitor de Controle de Cotações - IPC")
     st.text(
@@ -705,8 +653,8 @@ def main():
         "e a opção de download de planilhas para obter insights e sinalizar a necessidade "
         "de ampliação de amostras."
     )
-    #uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
-    #uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
+    # uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
+    # uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
     
     create_legend()
     
@@ -726,10 +674,10 @@ def main():
     #   
     #    if not df_atual.empty:
     #        df_atualizada = atualizar_base_incremental(df_atual, df_novo)
-     #   else:
-     #       df_atualizada = df_novo
-     #   
-     #   load_database(df_atualizada, table_name, con)
+    #   else:
+    #       df_atualizada = df_novo
+    #   
+    #   load_database(df_atualizada, table_name, con)
         
     
     #if uploaded_excess_file is not None:
