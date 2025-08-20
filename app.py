@@ -653,7 +653,7 @@ def main():
         "e a opção de download de planilhas para obter insights e sinalizar a necessidade "
         "de ampliação de amostras."
     )
-    # uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
+    uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
     # uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
     
     create_legend()
@@ -663,21 +663,21 @@ def main():
     service_table_name = "servicos"
     table_name = "controle_cotacoes"
     con = duckdb.connect(db_path)
-    #if uploaded_file is not None:
-    #    df_novo = read_excel_file(uploaded_file)
-    #    
-    #    try:
-    #        query = f"SELECT * FROM {table_name}"
-    #        df_atual = con.execute(query).fetchdf()
-    #    except Exception:
-    #        df_atual = pd.DataFrame()  
-    #   
-    #    if not df_atual.empty:
-    #        df_atualizada = atualizar_base_incremental(df_atual, df_novo)
-    #   else:
-    #       df_atualizada = df_novo
-    #   
-    #   load_database(df_atualizada, table_name, con)
+    if uploaded_file is not None:
+        df_novo = read_excel_file(uploaded_file)
+        
+        try:
+            query = f"SELECT * FROM {table_name}"
+            df_atual = con.execute(query).fetchdf()
+        except Exception:
+            df_atual = pd.DataFrame()  
+       
+        if not df_atual.empty:
+            df_atualizada = atualizar_base_incremental(df_atual, df_novo)
+       else:
+           df_atualizada = df_novo
+       
+       load_database(df_atualizada, table_name, con)
         
     
     #if uploaded_excess_file is not None:
@@ -718,3 +718,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
