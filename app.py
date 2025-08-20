@@ -562,7 +562,8 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
                 
 
                 df_sorted["Falta p/ Cobertura Mínima"] = df_sorted[qtd_col].apply(lambda x: max(0, 100 - x))
-
+                
+                df_sorted["Qtd - BP"] = None
                 cols_display = [
                     c for c in df_sorted.columns
                     if c not in ("Criticidade", "CriticidadeNivel")
@@ -654,6 +655,7 @@ def main():
         "de ampliação de amostras."
     )
     uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
+    uploaded_file_weight = st.sidebar.file_uploader("Atualize sua Base de Ponderações:", type=["xls", "xlsx"])
     # uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
     
     create_legend()
@@ -661,24 +663,19 @@ def main():
     db_path = "ipc.db"
     excess_table_name = "excessoes"
     service_table_name = "servicos"
+    weight_table_name = "ponderacoes"
     table_name = "controle_cotacoes"
     con = duckdb.connect(db_path)
     if uploaded_file is not None:
         df_novo = read_excel_file(uploaded_file)
-        
-        try:
-            query = f"SELECT * FROM {table_name}"
-            df_atual = con.execute(query).fetchdf()
-        except Exception:
-            df_atual = pd.DataFrame()  
-       
-        if not df_atual.empty:
-            df_atualizada = atualizar_base_incremental(df_atual, df_novo)
-       else:
-           df_atualizada = df_novo
-       
-       load_database(df_atualizada, table_name, con)
-        
+           
+        load_database(df_novo, table_name, con)
+    
+    if uploaded_file_weight is not None:
+        df_weight_novo = read_excel_weight_file(uploaded_file_weight)
+
+        load_database(df_weight_novo, weight_table_name, con)
+
     
     #if uploaded_excess_file is not None:
     #    df_excess_excel = read_excel_excess_file(uploaded_excess_file)
@@ -718,4 +715,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
