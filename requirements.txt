@@ -3,4 +3,5 @@ pandas
 numpy
 duckdb
 matplotlib
+openpyxl
 xlsxwriter
