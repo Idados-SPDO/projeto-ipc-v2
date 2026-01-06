@@ -783,8 +783,8 @@ def main():
         "e a opção de download de planilhas para obter insights e sinalizar a necessidade "
         "de ampliação de amostras."
     )
-    uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
-    uploaded_file_weight = st.sidebar.file_uploader("Atualize sua Base de Ponderações:", type=["xls", "xlsx"])
+    #uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
+    #uploaded_file_weight = st.sidebar.file_uploader("Atualize sua Base de Ponderações:", type=["xls", "xlsx"])
     # uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
    
     create_legend()
@@ -795,14 +795,14 @@ def main():
     weight_table_name = "ponderacoes"
     table_name = "controle_cotacoes"
     con = duckdb.connect(db_path)
-    if uploaded_file is not None:
-        df_novo = read_excel_file(uploaded_file)
-        load_database(df_novo, table_name, con)
+    #if uploaded_file is not None:
+    #    df_novo = read_excel_file(uploaded_file)
+    #    load_database(df_novo, table_name, con)
     
-    if uploaded_file_weight is not None:
-        df_weight_novo = read_excel_weight_file(uploaded_file_weight)
+    #if uploaded_file_weight is not None:
+    #    df_weight_novo = read_excel_weight_file(uploaded_file_weight)
 
-        load_database(df_weight_novo, weight_table_name, con)
+    #    load_database(df_weight_novo, weight_table_name, con)
 
     
     #if uploaded_excess_file is not None:
