@@ -3,6 +3,7 @@ import pandas as pd
 import duckdb
 import re
 import numpy as np
+import io
 
 from config import *
 from utils import to_excel, highlight_values, get_criticidade
@@ -493,13 +494,13 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
             
             df_weight_base = process_weight_data(df_weight)
             df_weight_filtrado = filter_weight_data(df_weight_base, input_capital, selected_item, selected_group)
-            
             df_weight_pivot = build_weight_pivot_table(df_weight_filtrado, locked_date)
             
             
             df_q = df_pivot.reset_index()
             df_q["Código"] = df_q["CodigoDescricao"].str.split(" - ").str[0]
             df_w = df_weight_pivot.reset_index()
+            
             df_w["Código"] = df_w["CodigoDescricao"].str.split(" - ").str[0]
             merge = pd.merge(df_q, df_w, on="Código", how="inner")
             
@@ -507,7 +508,6 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
             cols_y = [c for c in merge.columns if c.endswith('_y') and c != 'CodigoDescricao_y']
 
             df_sel = merge[['CodigoDescricao_x'] + cols_x + cols_y].copy()
-            
 
             rename_map = {'CodigoDescricao_x': 'CodigoDescricao'}
 
@@ -518,7 +518,7 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
             for c in cols_y:
                 uf = c[:-2] 
                 rename_map[c] = f'{uf}_pond'
-                
+            
             df_sel.rename(columns=rename_map, inplace=True)
             
             qtd_cols = [c for c in df_sel.columns if c.endswith("_qtd")]
@@ -563,7 +563,7 @@ def display_visao_geral(tab, df_comparativo, target_date, df_tab, df_weight, col
 
                 df_sorted["Falta p/ Cobertura Mínima"] = df_sorted[qtd_col].apply(lambda x: max(0, 100 - x))
                 
-                df_sorted["Qtd - BP"] = None
+                #df_sorted["Qtd - BP"] = None
                 cols_display = [
                     c for c in df_sorted.columns
                     if c not in ("Criticidade", "CriticidadeNivel")
@@ -646,6 +646,135 @@ def display_series_historica(tab, df, colunas_datas):
             else:
                 st.warning("Selecione pelo menos uma região e/ou item para visualizar a série histórica.")
     
+def display_comparativo_mes(tab, df: pd.DataFrame, df_excess: pd.DataFrame, df_service: pd.DataFrame, colunas_datas):
+    """
+    Comparativo do mês mais recente vs mês anterior, agregado (BR),
+    por insumo (CodigoDescricao), usando quantidade de cotações.
+    """
+    with tab:
+        st.write("### Comparativo - Mês Atual vs Mês Anterior (por Insumo • BR agregado)")
+
+        if df is None or df.empty or colunas_datas is None or len(colunas_datas) < 2:
+            st.warning("Base insuficiente para comparar (precisa de pelo menos 2 meses de colunas).")
+            return
+
+        # garante lista simples (caso venha Index)
+        date_cols = list(colunas_datas)
+        locked_date_atual = date_cols[-1]
+        locked_date_anterior = date_cols[-2]
+
+        st.caption(f"Comparando **{locked_date_atual}** (Atual) vs **{locked_date_anterior}** (Anterior).")
+
+        # Remove BR para não duplicar (df já contém BR agregado em prepare_base_data)
+        df_base = df[df["UF"].astype(str).str.upper().str.strip() != "BR"].copy()
+
+        df_base["CodigoDescricao"] = df_base["Código"].astype(str) + " - " + df_base["Descrição"].astype(str)
+
+        # Flags (mantém para possível uso futuro, mas sem checkbox)
+        if df_excess is not None and (not df_excess.empty) and "DESCRIÇÃO" in df_excess.columns:
+            excess_set = set(df_excess["DESCRIÇÃO"].dropna())
+            df_base["Exceção"] = df_base["CodigoDescricao"].apply(lambda x: any(exc in x for exc in excess_set))
+        else:
+            df_base["Exceção"] = False
+
+        if df_service is not None and (not df_service.empty) and "DESCRIÇÃO" in df_service.columns:
+            service_set = set(df_service["DESCRIÇÃO"].dropna())
+            df_base["Serviço"] = df_base["CodigoDescricao"].apply(lambda x: any(serv in x for serv in service_set))
+        else:
+            df_base["Serviço"] = False
+
+        # (Sem checkboxes) -> não filtra Exceção / Serviço
+        df_f = df_base
+
+        # Converte colunas para numérico
+        for c in [locked_date_atual, locked_date_anterior]:
+            df_f[c] = pd.to_numeric(df_f[c], errors="coerce")
+
+        # Agrega BR: soma todas as UFs por insumo
+        agg = (
+            df_f.groupby("CodigoDescricao", as_index=False)[[locked_date_atual, locked_date_anterior]]
+               .sum(min_count=1)
+        )
+
+        agg.rename(columns={
+            locked_date_atual: "Qtd_Atual",
+            locked_date_anterior: "Qtd_Anterior",
+        }, inplace=True)
+
+        # Variações
+        agg["Variação"] = agg["Qtd_Atual"] - agg["Qtd_Anterior"]
+        den = agg["Qtd_Anterior"].replace({0: np.nan})
+        agg["Variação (%)"] = (agg["Variação"] / den) * 100
+
+        # Ordenação: pior queda primeiro
+        agg = agg.sort_values(by=["Variação", "Qtd_Atual"], ascending=[True, True]).reset_index(drop=True)
+
+        st.dataframe(agg)
+
+        st.download_button(
+            label="📥 Baixar Comparativo por Insumo (Excel)",
+            data=to_excel(agg, "Comparativo_Insumo_BR"),
+            file_name="comparativo_mes_atual_vs_anterior_por_insumo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+
+def preview_excel_file(uploaded_file, title="Pré-visualização de Excel"):
+    """
+    Mostra as abas de um Excel (.xls/.xlsx) e permite visualizar o conteúdo de uma aba.
+    Não aplica 'skiprows' — é apenas uma prévia genérica.
+    """
+    st.subheader(title)
+
+    # Descobre a extensão para definir o engine
+    fname = (uploaded_file.name or "").lower()
+    if fname.endswith((".xlsx", ".xlsm", ".xltx", ".xltm")):
+        engine = "openpyxl"
+    elif fname.endswith(".xls"):
+        engine = "xlrd"
+    else:
+        st.error("Arquivo não reconhecido como Excel (.xls ou .xlsx).")
+        return
+
+    # Lê os bytes para permitir múltiplas leituras
+    file_bytes = uploaded_file.getvalue()
+    bio = io.BytesIO(file_bytes)
+
+    # Abre como ExcelFile para listar abas e fazer parse rápido
+    try:
+        xl = pd.ExcelFile(bio, engine=engine)
+    except ImportError as e:
+        # Dicas de dependências
+        if engine == "openpyxl":
+            st.error("Para abrir .xlsx é necessário o pacote 'openpyxl'. Instale e tente novamente.")
+        else:
+            st.error("Para abrir .xls é necessário o pacote 'xlrd'. Instale e tente novamente.")
+        return
+    except Exception as e:
+        st.error(f"Não foi possível abrir o arquivo como Excel: {e}")
+        return
+
+    sheets = xl.sheet_names or []
+    if not sheets:
+        st.warning("Nenhuma aba encontrada. Verifique se o arquivo está íntegro.")
+        return
+
+    # Controles de visualização
+    col_a, col_b = st.columns([2,1])
+    selected_sheet = col_a.selectbox("Escolha uma aba para visualizar:", options=sheets, index=0)
+    nrows = col_b.number_input("Linhas a exibir", min_value=5, max_value=1000, value=100, step=5)
+
+    try:
+        # parse via ExcelFile evita reabrir o arquivo
+        df_preview = xl.parse(selected_sheet, nrows=int(nrows))
+    except Exception as e:
+        st.error(f"Erro ao ler a aba '{selected_sheet}': {e}")
+        return
+
+    st.caption(f"Mostrando as primeiras {int(nrows)} linhas de **{selected_sheet}** "
+               f"(shape completo pode ser maior).")
+    st.dataframe(df_preview)
+
 def main():
     st.title("Leitor de Controle de Cotações - IPC")
     st.text(
@@ -654,10 +783,10 @@ def main():
         "e a opção de download de planilhas para obter insights e sinalizar a necessidade "
         "de ampliação de amostras."
     )
-    #uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
-    #uploaded_file_weight = st.sidebar.file_uploader("Atualize sua Base de Ponderações:", type=["xls", "xlsx"])
+    uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
+    uploaded_file_weight = st.sidebar.file_uploader("Atualize sua Base de Ponderações:", type=["xls", "xlsx"])
     # uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
-    
+   
     create_legend()
     
     db_path = "ipc.db"
@@ -666,18 +795,17 @@ def main():
     weight_table_name = "ponderacoes"
     table_name = "controle_cotacoes"
     con = duckdb.connect(db_path)
-    #if uploaded_file is not None:
-    #    df_novo = read_excel_file(uploaded_file)
-           
-    #    load_database(df_novo, table_name, con)
+    if uploaded_file is not None:
+        df_novo = read_excel_file(uploaded_file)
+        load_database(df_novo, table_name, con)
     
-    #if uploaded_file_weight is not None:
-    #    df_weight_novo = read_excel_weight_file(uploaded_file_weight)
+    if uploaded_file_weight is not None:
+        df_weight_novo = read_excel_weight_file(uploaded_file_weight)
 
-    #    load_database(df_weight_novo, weight_table_name, con)
+        load_database(df_weight_novo, weight_table_name, con)
 
     
-    # if uploaded_excess_file is not None:
+    #if uploaded_excess_file is not None:
     #    df_excess_excel = read_excel_excess_file(uploaded_excess_file)
     #    df_service_excel = read_excel_service_file(uploaded_excess_file)
     #    
@@ -702,7 +830,7 @@ def main():
     
     target_date = df_comparativo["Data"].iloc[-1]
     df_tab = prepare_quantity_table(df, df_excess, df_service)
-    tab1, tab2 = st.tabs(["Visão Geral", "Série Histórica"])
+    tab1, tab2, tab3 = st.tabs(["Visão Geral", "Série Histórica", "Comparativo Mensal"])
     display_visao_geral(
         tab1,
         df_comparativo,
@@ -712,7 +840,8 @@ def main():
         colunas_datas
     )
     display_series_historica(tab2, df, colunas_datas)
+    display_comparativo_mes(tab3, df, df_excess, df_service, colunas_datas)
+
 
 if __name__ == "__main__":
     main()
-
