@@ -646,31 +646,36 @@ def display_series_historica(tab, df, colunas_datas):
             else:
                 st.warning("Selecione pelo menos uma região e/ou item para visualizar a série histórica.")
     
-def display_comparativo_mes(tab, df: pd.DataFrame, df_excess: pd.DataFrame, df_service: pd.DataFrame, colunas_datas):
+def display_comparativo_mes(
+    tab,
+    df: pd.DataFrame,
+    df_excess: pd.DataFrame,
+    df_service: pd.DataFrame,
+    colunas_datas
+):
     """
-    Comparativo do mês mais recente vs mês anterior, agregado (BR),
-    por insumo (CodigoDescricao), usando quantidade de cotações.
+    Aba: Comparativo Mensal
+      - Sub-aba 1: Atual vs Anterior (totais + diferença)
+      - Sub-aba 2: Gráfico mês a mês (agregado total do mês)
     """
     with tab:
-        st.write("### Comparativo - Mês Atual vs Mês Anterior (por Insumo • BR agregado)")
+        st.write("### Comparativo Mensal")
 
         if df is None or df.empty or colunas_datas is None or len(colunas_datas) < 2:
             st.warning("Base insuficiente para comparar (precisa de pelo menos 2 meses de colunas).")
             return
 
-        # garante lista simples (caso venha Index)
+        # garante lista simples
         date_cols = list(colunas_datas)
         locked_date_atual = date_cols[-1]
         locked_date_anterior = date_cols[-2]
 
-        st.caption(f"Comparando **{locked_date_atual}** (Atual) vs **{locked_date_anterior}** (Anterior).")
-
-        # Remove BR para não duplicar (df já contém BR agregado em prepare_base_data)
+        # Remove BR para não duplicar (df já contém BR agregado no prepare_base_data)
         df_base = df[df["UF"].astype(str).str.upper().str.strip() != "BR"].copy()
 
         df_base["CodigoDescricao"] = df_base["Código"].astype(str) + " - " + df_base["Descrição"].astype(str)
 
-        # Flags (mantém para possível uso futuro, mas sem checkbox)
+        # Flags (mantém consistência com o resto do app; não filtra por padrão)
         if df_excess is not None and (not df_excess.empty) and "DESCRIÇÃO" in df_excess.columns:
             excess_set = set(df_excess["DESCRIÇÃO"].dropna())
             df_base["Exceção"] = df_base["CodigoDescricao"].apply(lambda x: any(exc in x for exc in excess_set))
@@ -683,40 +688,97 @@ def display_comparativo_mes(tab, df: pd.DataFrame, df_excess: pd.DataFrame, df_s
         else:
             df_base["Serviço"] = False
 
-        # (Sem checkboxes) -> não filtra Exceção / Serviço
-        df_f = df_base
+        sub1, sub2 = st.tabs([
+            "Atual vs Anterior",
+            "Evolução Mensal"
+        ])
 
-        # Converte colunas para numérico
-        for c in [locked_date_atual, locked_date_anterior]:
-            df_f[c] = pd.to_numeric(df_f[c], errors="coerce")
+        # =========================
+        # Sub-aba 1: Resumo + (opcional) detalhe por insumo
+        # =========================
+        with sub1:
+            st.caption(f"Comparando **{locked_date_atual}** (Atual) vs **{locked_date_anterior}** (Anterior).")
 
-        # Agrega BR: soma todas as UFs por insumo
-        agg = (
-            df_f.groupby("CodigoDescricao", as_index=False)[[locked_date_atual, locked_date_anterior]]
-               .sum(min_count=1)
-        )
+            df_f = df_base.copy()
+            for c in [locked_date_atual, locked_date_anterior]:
+                df_f[c] = pd.to_numeric(df_f[c], errors="coerce")
 
-        agg.rename(columns={
-            locked_date_atual: "Qtd_Atual",
-            locked_date_anterior: "Qtd_Anterior",
-        }, inplace=True)
+            total_atual = float(df_f[locked_date_atual].sum(skipna=True))
+            total_anterior = float(df_f[locked_date_anterior].sum(skipna=True))
+            diff = total_atual - total_anterior
+            pct = (diff / total_anterior * 100) if total_anterior not in (0, np.nan) and total_anterior != 0 else np.nan
 
-        # Variações
-        agg["Variação"] = agg["Qtd_Atual"] - agg["Qtd_Anterior"]
-        den = agg["Qtd_Anterior"].replace({0: np.nan})
-        agg["Variação (%)"] = (agg["Variação"] / den) * 100
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Atual", f"{total_atual:,.0f}".replace(",", "."))
+            c2.metric("Total Anterior", f"{total_anterior:,.0f}".replace(",", "."))
+            if pd.isna(pct):
+                c3.metric("Diferença", f"{diff:,.0f}".replace(",", "."))
+            else:
+                c3.metric("Diferença", f"{diff:,.0f}".replace(",", "."), delta=f"{pct:.2f}%")
 
-        # Ordenação: pior queda primeiro
-        agg = agg.sort_values(by=["Variação", "Qtd_Atual"], ascending=[True, True]).reset_index(drop=True)
+            st.divider()
+            st.write("#### Detalhe por insumo (BR agregado por soma das UFs)")
+            agg = (
+                df_f.groupby("CodigoDescricao", as_index=False)[[locked_date_atual, locked_date_anterior]]
+                    .sum(min_count=1)
+            )
+            agg.rename(columns={
+                locked_date_atual: "Qtd_Atual",
+                locked_date_anterior: "Qtd_Anterior",
+            }, inplace=True)
 
-        st.dataframe(agg)
+            agg["Diferença"] = agg["Qtd_Atual"] - agg["Qtd_Anterior"]
+            den = agg["Qtd_Anterior"].replace({0: np.nan})
+            agg["Diferença (%)"] = (agg["Diferença"] / den) * 100
 
-        st.download_button(
-            label="📥 Baixar Comparativo por Insumo (Excel)",
-            data=to_excel(agg, "Comparativo_Insumo_BR"),
-            file_name="comparativo_mes_atual_vs_anterior_por_insumo.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            # pior queda primeiro
+            agg = agg.sort_values(by=["Diferença", "Qtd_Atual"], ascending=[True, True]).reset_index(drop=True)
+
+            st.dataframe(agg)
+
+            st.download_button(
+                label="📥 Baixar Detalhe (Excel)",
+                data=to_excel(agg, "Comparativo_Insumo_BR"),
+                file_name="comparativo_atual_vs_anterior_detalhe_por_insumo.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        # =========================
+        # Sub-aba 2: Série mensal agregada (gráfico)
+        # =========================
+        with sub2:
+            st.caption("Gráfico mês a mês considerando o **total agregado do mês**.")
+
+            df_series = df_base.copy()
+
+            # Converte todas as colunas de data para numérico
+            for c in date_cols:
+                df_series[c] = pd.to_numeric(df_series[c], errors="coerce")
+
+            totais_por_mes = df_series[date_cols].sum(axis=0, skipna=True)
+
+            # Parse robusto de rótulos tipo "mm/YYYY"
+            def _parse_mes_label(label: str):
+                m = re.search(r"(\d{2}/\d{4})", str(label))
+                return pd.to_datetime(m.group(1), format="%m/%Y", errors="coerce") if m else pd.NaT
+
+            df_totais = pd.DataFrame({
+                "Data": date_cols,
+                "Data_dt": [ _parse_mes_label(c) for c in date_cols ],
+                "Total": totais_por_mes.values
+            }).dropna(subset=["Data_dt"]).sort_values("Data_dt")
+
+            st.line_chart(df_totais.set_index("Data_dt")["Total"])
+
+            with st.expander("Ver tabela do agregado mensal"):
+                st.dataframe(df_totais[["Data", "Total"]])
+
+            st.download_button(
+                label="📥 Baixar Agregado Mensal (Excel)",
+                data=to_excel(df_totais[["Data", "Total"]], "Agregado_Mensal"),
+                file_name="agregado_total_mes_a_mes.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 
 def preview_excel_file(uploaded_file, title="Pré-visualização de Excel"):
