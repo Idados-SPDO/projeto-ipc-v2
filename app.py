@@ -261,7 +261,7 @@ def build_pivot_table(df, locked_date):
     df_locked.rename(columns={locked_date: "Valor"}, inplace=True)
     df_pivot = df_locked.pivot(index="CodigoDescricao", columns="UF", values="Valor")
     df_pivot = df_pivot.fillna('-')
-    df_pivot = df_pivot.applymap(lambda x: int(x) if isinstance(x, float) and x.is_integer() else x)
+    df_pivot = df_pivot.map(lambda x: int(x) if isinstance(x, float) and x.is_integer() else x)
     if "BR" in df_pivot.columns:
         df_pivot = df_pivot.drop("BR", axis=1)
     df_pivot.index.name = "CodigoDescricao"
@@ -272,7 +272,7 @@ def build_weight_pivot_table(df, locked_date):
     df_locked.rename(columns={locked_date: "Valor"}, inplace=True)
     df_pivot = df_locked.pivot(index="CodigoDescricao", columns="UF", values="Valor")
     df_pivot = df_pivot.fillna('-')
-    df_pivot = df_pivot.applymap(lambda x: int(x) if isinstance(x, float) and x.is_integer() else x)
+    df_pivot = df_pivot.map(lambda x: int(x) if isinstance(x, float) and x.is_integer() else x)
     if "BR" in df_pivot.columns:
         df_pivot = df_pivot.drop("BR", axis=1)
     df_pivot.index.name = "CodigoDescricao"
@@ -636,7 +636,7 @@ def display_series_historica(tab, df, colunas_datas):
             df_series_filtered = df_series[df_series["UF"].isin(selected_capitais)]
             if selected_group:
                 df_series_filtered = df_series_filtered[df_series_filtered["Grupo"].isin(selected_group)]
-            elif selected_items:
+            if selected_items:
                 df_series_filtered = df_series_filtered[df_series_filtered["CodigoDescricao"].isin(selected_items)]
             if not df_series_filtered.empty:
                 df_pivot = df_series_filtered.pivot_table(index="Data_clean",
@@ -845,9 +845,9 @@ def main():
         "e a opção de download de planilhas para obter insights e sinalizar a necessidade "
         "de ampliação de amostras."
     )
-    #uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
-    #uploaded_file_weight = st.sidebar.file_uploader("Atualize sua Base de Ponderações:", type=["xls", "xlsx"])
-    # uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
+    uploaded_file = st.sidebar.file_uploader("Atualize sua Base de Cotações:", type=["xls", "xlsx"])
+    uploaded_file_weight = st.sidebar.file_uploader("Atualize sua Base de Ponderações:", type=["xls", "xlsx"])
+    uploaded_excess_file = st.sidebar.file_uploader("Atualize sua Base de Excessões:", type=["xls", "xlsx"])
    
     create_legend()
     
@@ -857,27 +857,27 @@ def main():
     weight_table_name = "ponderacoes"
     table_name = "controle_cotacoes"
     con = duckdb.connect(db_path)
-    #if uploaded_file is not None:
-    #    df_novo = read_excel_file(uploaded_file)
-    #    load_database(df_novo, table_name, con)
+    if uploaded_file is not None:
+        df_novo = read_excel_file(uploaded_file)
+        load_database(df_novo, table_name, con)
     
-    #if uploaded_file_weight is not None:
-    #    df_weight_novo = read_excel_weight_file(uploaded_file_weight)
+    if uploaded_file_weight is not None:
+        df_weight_novo = read_excel_weight_file(uploaded_file_weight)
 
-    #    load_database(df_weight_novo, weight_table_name, con)
+        load_database(df_weight_novo, weight_table_name, con)
 
     
-    #if uploaded_excess_file is not None:
-    #    df_excess_excel = read_excel_excess_file(uploaded_excess_file)
-    #    df_service_excel = read_excel_service_file(uploaded_excess_file)
-    #    
-    #    con.register("df_excess_excel", df_excess_excel)
-    #    con.execute(f"DROP TABLE IF EXISTS {excess_table_name}")
-    #    con.execute(f"CREATE TABLE {excess_table_name} AS SELECT * FROM df_excess_excel")
-    #    
-    #    con.register("df_service_excel", df_service_excel)
-    #    con.execute(f"DROP TABLE IF EXISTS {service_table_name}")
-    #    con.execute(f"CREATE TABLE {service_table_name} AS SELECT * FROM df_service_excel")
+    if uploaded_excess_file is not None:
+        df_excess_excel = read_excel_excess_file(uploaded_excess_file)
+        df_service_excel = read_excel_service_file(uploaded_excess_file)
+        
+        con.register("df_excess_excel", df_excess_excel)
+        con.execute(f"DROP TABLE IF EXISTS {excess_table_name}")
+        con.execute(f"CREATE TABLE {excess_table_name} AS SELECT * FROM df_excess_excel")
+        
+        con.register("df_service_excel", df_service_excel)
+        con.execute(f"DROP TABLE IF EXISTS {service_table_name}")
+        con.execute(f"CREATE TABLE {service_table_name} AS SELECT * FROM df_service_excel")
     
     
     df, df_melted, df_excess, df_weight, df_service ,colunas_datas = prepare_base_data(
